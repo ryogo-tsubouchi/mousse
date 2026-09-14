@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -12,8 +13,10 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -205,6 +208,8 @@ class RestClientTests {
   void loggingFiltersLogRequestAndResponseTest() {
     Logger requestLogger = (Logger) LoggerFactory.getLogger(RequestLoggingFilter.class);
     Logger responseLogger = (Logger) LoggerFactory.getLogger(ResponseLoggingFilter.class);
+    Level originalRequestLevel = requestLogger.getLevel();
+    Level originalResponseLevel = responseLogger.getLevel();
     ListAppender<ILoggingEvent> appender = new ListAppender<>();
     appender.start();
     requestLogger.addAppender(appender);
@@ -214,14 +219,26 @@ class RestClientTests {
     RestClient loggingClient =
         RestClient.builder()
             .baseUrl(baseUrl)
+            .header("X-Request-Id", "logging-test")
+            .header("Authorization", "Bearer test-secret")
             .filters(List.of(new RequestLoggingFilter(), new ResponseLoggingFilter()))
             .build();
 
     try {
+      requestLogger.setLevel(Level.DEBUG);
+      responseLogger.setLevel(Level.DEBUG);
       loggingClient.post("/api/items", Item.of("1", "Logged Item"), Item.class);
 
       List<String> messages =
           appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+      assertEquals(7, messages.size());
+      assertTrue(messages.get(2).startsWith("Request headers: "));
+      assertTrue(messages.get(2).contains("X-Request-Id=[logging-test]"));
+      assertTrue(!messages.get(2).contains("Authorization"));
+      assertTrue(messages.get(5).startsWith("Response headers: "));
+      assertTrue(messages.get(5).contains("content-type=[application/json; charset=UTF-8]"));
+      assertEquals(Level.INFO, appender.list.get(2).getLevel());
+      assertEquals(Level.INFO, appender.list.get(5).getLevel());
       assertEquals(
           List.of(
               "Request method: POST",
@@ -229,12 +246,49 @@ class RestClientTests {
               "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}",
               "Response status: 200",
               "Response body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
-          messages);
+          List.of(
+              messages.get(0), messages.get(1), messages.get(3), messages.get(4), messages.get(6)));
+
+      requestLogger.setLevel(Level.INFO);
+      responseLogger.setLevel(Level.INFO);
+      appender.list.clear();
+      loggingClient.post("/api/items", Item.of("1", "Logged Item"), Item.class);
+
+      List<String> infoMessages =
+          appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+      assertEquals(5, infoMessages.size());
+      assertEquals(messages.get(2), infoMessages.get(2));
+      assertTrue(infoMessages.get(4).startsWith("Response headers: "));
+      assertTrue(infoMessages.get(4).contains("content-type=[application/json; charset=UTF-8]"));
+      assertTrue(appender.list.stream().allMatch(event -> event.getLevel() == Level.INFO));
     } finally {
+      requestLogger.setLevel(originalRequestLevel);
+      responseLogger.setLevel(originalResponseLevel);
       requestLogger.detachAppender(appender);
       responseLogger.detachAppender(appender);
       appender.stop();
     }
+  }
+
+  @Test
+  void headerLoggingMasksSecretsAndPreservesMultipleValuesTest() {
+    Map<String, List<String>> values =
+        Map.of(
+            "aUtHoRiZaTiOn", List.of("Bearer secret"),
+            "Proxy-Authorization", List.of("Basic secret"),
+            "Cookie", List.of("session=secret"),
+            "Set-Cookie", List.of("session=secret", "token=secret"),
+            "X-API-Key", List.of("secret"),
+            "x-request-id", List.of("request-1", "request-2"),
+            "X-Trace", List.of("first", "second"));
+    HttpHeaders headers = HttpHeaders.of(values, (name, value) -> true);
+
+    Map<String, List<String>> formatted = HeaderLogFormatter.format(headers);
+
+    assertEquals(Map.of("x-request-id", List.of("request-1", "request-2")), formatted);
+    assertEquals(values, headers.map());
+    assertTrue(
+        HeaderLogFormatter.format(HttpHeaders.of(Map.of(), (name, value) -> true)).isEmpty());
   }
 
   @Test
