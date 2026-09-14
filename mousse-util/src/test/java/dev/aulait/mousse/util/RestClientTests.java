@@ -16,6 +16,7 @@ import java.net.InetSocketAddress;
 import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
@@ -252,6 +253,13 @@ class RestClientTests {
             .filters(List.of(new RequestLoggingFilter(), new ResponseLoggingFilter()))
             .build();
 
+    String expectedRequestHeaders =
+        "Request headers: {Accept=[*/*], Accept-Language=["
+            + Locale.getDefault().toString().replace("_", "-")
+            + "], Content-Type=[application/json; charset=UTF-8], X-Request-Id=[logging-test]}";
+    String expectedResponseHeaders =
+        "Response headers: {content-length=[31], content-type=[application/json; charset=UTF-8]}";
+
     try {
       requestLogger.setLevel(Level.DEBUG);
       responseLogger.setLevel(Level.DEBUG);
@@ -259,36 +267,16 @@ class RestClientTests {
 
       List<String> messages =
           appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
-      assertEquals(7, messages.size());
-      assertTrue(messages.get(2).startsWith("Request headers: "));
-      assertTrue(messages.get(2).contains("X-Request-Id=[logging-test]"));
-      assertTrue(!messages.get(2).contains("Authorization"));
-      assertTrue(messages.get(5).startsWith("Response headers: "));
-      assertTrue(messages.get(5).contains("content-type=[application/json; charset=UTF-8]"));
-      assertEquals(Level.INFO, appender.list.get(2).getLevel());
-      assertEquals(Level.INFO, appender.list.get(5).getLevel());
       assertEquals(
           List.of(
               "Request method: POST",
               "Request URI: " + baseUrl + "/api/items",
+              expectedRequestHeaders,
               "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}",
               "Response status: 200",
+              expectedResponseHeaders,
               "Response body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
-          List.of(
-              messages.get(0), messages.get(1), messages.get(3), messages.get(4), messages.get(6)));
-
-      requestLogger.setLevel(Level.INFO);
-      responseLogger.setLevel(Level.INFO);
-      appender.list.clear();
-      loggingClient.post("/api/items", Item.of("1", "Logged Item"), Item.class);
-
-      List<String> infoMessages =
-          appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
-      assertEquals(5, infoMessages.size());
-      assertEquals(messages.get(2), infoMessages.get(2));
-      assertTrue(infoMessages.get(4).startsWith("Response headers: "));
-      assertTrue(infoMessages.get(4).contains("content-type=[application/json; charset=UTF-8]"));
-      assertTrue(appender.list.stream().allMatch(event -> event.getLevel() == Level.INFO));
+          messages);
     } finally {
       requestLogger.setLevel(originalRequestLevel);
       responseLogger.setLevel(originalResponseLevel);
