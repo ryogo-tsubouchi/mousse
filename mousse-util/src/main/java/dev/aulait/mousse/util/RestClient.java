@@ -6,10 +6,8 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublisher;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +17,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.Flow;
 import java.util.function.Supplier;
 import lombok.Builder;
 import lombok.Data;
@@ -69,7 +66,7 @@ public class RestClient {
    */
   public <T> T get(String path, Class<T> responseType, Object... pathParams) {
     HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, new byte[0], new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -84,7 +81,7 @@ public class RestClient {
    */
   public <T> T get(String path, JsonType<T> typeRef, Object... pathParams) {
     HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return execute(request, new ResponseType<>(typeRef)).getParsedBody();
+    return execute(request, new byte[0], new ResponseType<>(typeRef)).getParsedBody();
   }
 
   /**
@@ -112,9 +109,10 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T post(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
+    byte[] body = toBody(requestBody);
     HttpRequest request =
-        newRequest(resolvePath(path, pathParams)).POST(toBodyPublisher(requestBody)).build();
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+        newRequest(resolvePath(path, pathParams)).POST(BodyPublishers.ofByteArray(body)).build();
+    return execute(request, body, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -141,10 +139,11 @@ public class RestClient {
   public <T> T postMultipart(
       String path, Map<String, Object> parts, Class<T> responseType, Object... pathParams) {
     String boundary = UUID.randomUUID().toString();
+    byte[] body = toMultipartBody(parts, boundary);
     HttpRequest.Builder builder = newRequest(resolvePath(path, pathParams));
     builder.setHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-    HttpRequest request = builder.POST(toMultipartBodyPublisher(parts, boundary)).build();
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    HttpRequest request = builder.POST(BodyPublishers.ofByteArray(body)).build();
+    return execute(request, body, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -159,9 +158,10 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T put(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
+    byte[] body = toBody(requestBody);
     HttpRequest request =
-        newRequest(resolvePath(path, pathParams)).PUT(toBodyPublisher(requestBody)).build();
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+        newRequest(resolvePath(path, pathParams)).PUT(BodyPublishers.ofByteArray(body)).build();
+    return execute(request, body, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -177,11 +177,12 @@ public class RestClient {
    */
   public <T> T delete(
       String path, Object requestBody, Class<T> responseType, Object... pathParams) {
+    byte[] body = toBody(requestBody);
     HttpRequest request =
         newRequest(resolvePath(path, pathParams))
-            .method("DELETE", toBodyPublisher(requestBody))
+            .method("DELETE", BodyPublishers.ofByteArray(body))
             .build();
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, body, new ResponseType<>(responseType)).getParsedBody();
   }
 
   private HttpRequest.Builder newRequest(String url) {
@@ -197,14 +198,14 @@ public class RestClient {
     return builder;
   }
 
-  private BodyPublisher toBodyPublisher(Object body) {
+  private byte[] toBody(Object body) {
     if (body == null) {
-      return new RepeatableBodyPublisher(new byte[0]);
+      return new byte[0];
     }
-    return new RepeatableBodyPublisher(JsonUtils.obj2str(body).getBytes(StandardCharsets.UTF_8));
+    return JsonUtils.obj2str(body).getBytes(StandardCharsets.UTF_8);
   }
 
-  private BodyPublisher toMultipartBodyPublisher(Map<String, Object> parts, String boundary) {
+  private byte[] toMultipartBody(Map<String, Object> parts, String boundary) {
     try {
       ByteArrayOutputStream baos = new ByteArrayOutputStream();
       for (Map.Entry<String, Object> entry : parts.entrySet()) {
@@ -243,34 +244,29 @@ public class RestClient {
         baos.write("\r\n".getBytes(StandardCharsets.UTF_8));
       }
       baos.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
-      return new RepeatableBodyPublisher(baos.toByteArray());
+      return baos.toByteArray();
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
   }
 
-  private <T> ResponseWrapper<T> execute(HttpRequest request, ResponseType<T> responseType) {
-    ResponseWrapper<T> response = send(request, responseType);
+  private <T> ResponseWrapper<T> execute(
+      HttpRequest request, byte[] body, ResponseType<T> responseType) {
+    ResponseWrapper<T> response = send(request, body, responseType);
     handleResponse(response);
     convertResponse(response);
     return response;
   }
 
   private byte[] executeAsBytes(HttpRequest request) {
-    ResponseWrapper<byte[]> response = send(request, new ResponseType<>(byte[].class));
+    ResponseWrapper<byte[]> response = send(request, new byte[0], new ResponseType<>(byte[].class));
     handleResponse(response);
     return response.getResponse().body();
   }
 
-  private <T> ResponseWrapper<T> send(HttpRequest request, ResponseType<T> responseType) {
+  private <T> ResponseWrapper<T> send(
+      HttpRequest request, byte[] body, ResponseType<T> responseType) {
     HttpResponse.BodyHandler<T> bodyHandler = bodyHandler(responseType.getType());
-    byte[] body =
-        request
-            .bodyPublisher()
-            .filter(RepeatableBodyPublisher.class::isInstance)
-            .map(RepeatableBodyPublisher.class::cast)
-            .map(RepeatableBodyPublisher::body)
-            .orElseGet(() -> new byte[0]);
     HttpResponse<T> response =
         new FilterContextImpl(filters, this::getHttpClientWithInit)
             .next(new RestClientRequest(request, body), bodyHandler);
@@ -283,31 +279,6 @@ public class RestClient {
           HttpClient.newBuilder().connectTimeout(Duration.ofMillis(connectTimeoutMillis)).build();
     }
     return httpClient;
-  }
-
-  private static class RepeatableBodyPublisher implements BodyPublisher {
-
-    private final byte[] body;
-    private final BodyPublisher delegate;
-
-    RepeatableBodyPublisher(byte[] body) {
-      this.body = body.clone();
-      this.delegate = BodyPublishers.ofByteArray(this.body);
-    }
-
-    byte[] body() {
-      return body.clone();
-    }
-
-    @Override
-    public long contentLength() {
-      return delegate.contentLength();
-    }
-
-    @Override
-    public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
-      delegate.subscribe(subscriber);
-    }
   }
 
   @SuppressWarnings("unchecked")
