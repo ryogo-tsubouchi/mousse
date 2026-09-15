@@ -14,7 +14,7 @@ public class ResponseLoggingFilter implements RestClientFilter {
       RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context) {
     HttpResponse<T> response = context.next(request, bodyHandler);
     log.info("Response status: {}", response.statusCode());
-    log.info("Response headers: {}", HeaderLogFormatter.format(response.headers()));
+    log.info("Response headers: {}", response.headers().map());
     if (log.isDebugEnabled()) {
       log.debug("Response body: {}", bodyAsString(response.body()));
     }

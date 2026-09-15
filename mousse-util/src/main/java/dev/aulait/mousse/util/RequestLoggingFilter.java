@@ -12,7 +12,7 @@ public class RequestLoggingFilter implements RestClientFilter {
       RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context) {
     log.info("Request method: {}", request.method());
     log.info("Request URI: {}", request.uri());
-    log.info("Request headers: {}", HeaderLogFormatter.format(request.headers()));
+    log.info("Request headers: {}", request.headers().map());
     if (log.isDebugEnabled()) {
       log.debug("Request body: {}", request.bodyAsString());
     }
