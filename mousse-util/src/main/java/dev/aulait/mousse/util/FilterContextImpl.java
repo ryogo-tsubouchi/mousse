@@ -17,6 +17,17 @@ class FilterContextImpl implements FilterContext {
     this.httpClientSupplier = httpClientSupplier;
   }
 
+  /**
+   * Invokes the next filter, or sends the HTTP request when no filters remain.
+   *
+   * <p>Each filter must call {@code context.next(request, bodyHandler)} to continue the chain.
+   * Without this call, the remaining filters are not invoked and the HTTP request is not sent.
+   *
+   * @param request the request to pass to the next filter or send
+   * @param bodyHandler the response body handler
+   * @param <T> the response body type
+   * @return the response returned by the next filter or the HTTP client
+   */
   @Override
   public <T> HttpResponse<T> next(
       RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler) {
