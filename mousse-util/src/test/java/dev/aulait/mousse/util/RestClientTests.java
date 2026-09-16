@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.read.ListAppender;
+import com.github.valfirst.slf4jtest.LoggingEvent;
+import com.github.valfirst.slf4jtest.TestLogger;
+import com.github.valfirst.slf4jtest.TestLoggerFactory;
+import com.github.valfirst.slf4jtest.TestLoggerFactoryExtension;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -24,8 +24,10 @@ import lombok.NoArgsConstructor;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.event.Level;
 
+@ExtendWith(TestLoggerFactoryExtension.class)
 class RestClientTests {
 
   static HttpServer server;
@@ -233,14 +235,10 @@ class RestClientTests {
 
   @Test
   void loggingFiltersLogRequestAndResponseTest() {
-    Logger requestLogger = (Logger) LoggerFactory.getLogger(RequestLoggingFilter.class);
-    Logger responseLogger = (Logger) LoggerFactory.getLogger(ResponseLoggingFilter.class);
-    Level originalRequestLevel = requestLogger.getLevel();
-    Level originalResponseLevel = responseLogger.getLevel();
-    ListAppender<ILoggingEvent> appender = new ListAppender<>();
-    appender.start();
-    requestLogger.addAppender(appender);
-    responseLogger.addAppender(appender);
+    TestLogger requestLogger = TestLoggerFactory.getTestLogger(RequestLoggingFilter.class);
+    TestLogger responseLogger = TestLoggerFactory.getTestLogger(ResponseLoggingFilter.class);
+    requestLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
+    responseLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
 
     String baseUrl = "http://localhost:" + server.getAddress().getPort();
     RestClient loggingClient =
@@ -260,33 +258,27 @@ class RestClientTests {
         "Response headers: {content-length=[31], content-type=[application/json; charset=UTF-8],"
             + " date=[<date>]}";
 
-    try {
-      requestLogger.setLevel(Level.DEBUG);
-      responseLogger.setLevel(Level.DEBUG);
-      loggingClient.post("/api/items", Item.of("1", "Logged Item"), Item.class);
+    loggingClient.post("/api/items", Item.of("1", "Logged Item"), Item.class);
 
-      List<String> messages =
-          appender.list.stream()
-              .map(ILoggingEvent::getFormattedMessage)
-              .map(message -> message.replaceFirst("date=\\[[^\\]]+\\]", "date=[<date>]"))
-              .toList();
-      assertEquals(
-          List.of(
-              "Request method: POST",
-              "Request URI: " + baseUrl + "/api/items",
-              expectedRequestHeaders,
-              "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}",
-              "Response status: 200",
-              expectedResponseHeaders,
-              "Response body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
-          messages);
-    } finally {
-      requestLogger.setLevel(originalRequestLevel);
-      responseLogger.setLevel(originalResponseLevel);
-      requestLogger.detachAppender(appender);
-      responseLogger.detachAppender(appender);
-      appender.stop();
-    }
+    List<LoggingEvent> requestEvents = requestLogger.getLoggingEvents();
+    assertEquals(
+        List.of(
+            "Request method: POST",
+            "Request URI: " + baseUrl + "/api/items",
+            expectedRequestHeaders,
+            "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
+        requestEvents.stream().map(LoggingEvent::getFormattedMessage).toList());
+
+    List<LoggingEvent> responseEvents = responseLogger.getLoggingEvents();
+    assertEquals(
+        List.of(
+            "Response status: 200",
+            expectedResponseHeaders,
+            "Response body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
+        responseEvents.stream()
+            .map(LoggingEvent::getFormattedMessage)
+            .map(message -> message.replaceFirst("date=\\[[^\\]]+\\]", "date=[<date>]"))
+            .toList());
   }
 
   @Test
