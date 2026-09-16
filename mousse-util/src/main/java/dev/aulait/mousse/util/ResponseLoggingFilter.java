@@ -11,7 +11,7 @@ public class ResponseLoggingFilter implements RestClientFilter {
 
   @Override
   public <T> HttpResponse<T> filter(
-      RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context) {
+      RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context) {
     HttpResponse<T> response = context.next(request, bodyHandler);
     log.info("Response status: {}", response.statusCode());
     log.info("Response headers: {}", response.headers().map());

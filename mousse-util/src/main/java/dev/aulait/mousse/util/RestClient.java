@@ -66,8 +66,7 @@ public class RestClient {
    */
   public <T> T get(String path, Class<T> responseType, Object... pathParams) {
     HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return execute(new RestClientRequest(request), new ResponseType<>(responseType))
-        .getParsedBody();
+    return execute(new RequestWrapper(request), new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -82,7 +81,7 @@ public class RestClient {
    */
   public <T> T get(String path, JsonType<T> typeRef, Object... pathParams) {
     HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return execute(new RestClientRequest(request), new ResponseType<>(typeRef)).getParsedBody();
+    return execute(new RequestWrapper(request), new ResponseType<>(typeRef)).getParsedBody();
   }
 
   /**
@@ -95,7 +94,7 @@ public class RestClient {
    */
   public byte[] getAsByte(String path, Object... pathParams) {
     HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return executeAsBytes(new RestClientRequest(request));
+    return executeAsBytes(new RequestWrapper(request));
   }
 
   /**
@@ -113,7 +112,7 @@ public class RestClient {
     byte[] body = toBody(requestBody);
     HttpRequest request =
         newRequest(resolvePath(path, pathParams)).POST(BodyPublishers.ofByteArray(body)).build();
-    return execute(new RestClientRequest(request, body), new ResponseType<>(responseType))
+    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
         .getParsedBody();
   }
 
@@ -145,7 +144,7 @@ public class RestClient {
     HttpRequest.Builder builder = newRequest(resolvePath(path, pathParams));
     builder.setHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     HttpRequest request = builder.POST(BodyPublishers.ofByteArray(body)).build();
-    return execute(new RestClientRequest(request, body), new ResponseType<>(responseType))
+    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
         .getParsedBody();
   }
 
@@ -164,7 +163,7 @@ public class RestClient {
     byte[] body = toBody(requestBody);
     HttpRequest request =
         newRequest(resolvePath(path, pathParams)).PUT(BodyPublishers.ofByteArray(body)).build();
-    return execute(new RestClientRequest(request, body), new ResponseType<>(responseType))
+    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
         .getParsedBody();
   }
 
@@ -186,7 +185,7 @@ public class RestClient {
         newRequest(resolvePath(path, pathParams))
             .method("DELETE", BodyPublishers.ofByteArray(body))
             .build();
-    return execute(new RestClientRequest(request, body), new ResponseType<>(responseType))
+    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
         .getParsedBody();
   }
 
@@ -255,20 +254,20 @@ public class RestClient {
     }
   }
 
-  private <T> ResponseWrapper<T> execute(RestClientRequest request, ResponseType<T> responseType) {
+  private <T> ResponseWrapper<T> execute(RequestWrapper request, ResponseType<T> responseType) {
     ResponseWrapper<T> response = send(request, responseType);
     handleResponse(response);
     convertResponse(response);
     return response;
   }
 
-  private byte[] executeAsBytes(RestClientRequest request) {
+  private byte[] executeAsBytes(RequestWrapper request) {
     ResponseWrapper<byte[]> response = send(request, new ResponseType<>(byte[].class));
     handleResponse(response);
     return response.getResponse().body();
   }
 
-  private <T> ResponseWrapper<T> send(RestClientRequest request, ResponseType<T> responseType) {
+  private <T> ResponseWrapper<T> send(RequestWrapper request, ResponseType<T> responseType) {
     HttpResponse.BodyHandler<T> bodyHandler = bodyHandler(responseType.getType());
     HttpResponse<T> response =
         new FilterContextImpl(filters, this::getHttpClientWithInit).next(request, bodyHandler);

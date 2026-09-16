@@ -9,10 +9,10 @@ public class RequestLoggingFilter implements RestClientFilter {
 
   @Override
   public <T> HttpResponse<T> filter(
-      RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context) {
-    log.info("Request method: {}", request.method());
-    log.info("Request URI: {}", request.uri());
-    log.info("Request headers: {}", request.headers().map());
+      RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context) {
+    log.info("Request method: {}", request.getRequest().method());
+    log.info("Request URI: {}", request.getRequest().uri());
+    log.info("Request headers: {}", request.getRequest().headers().map());
     if (log.isDebugEnabled()) {
       log.debug("Request body: {}", request.bodyAsString());
     }

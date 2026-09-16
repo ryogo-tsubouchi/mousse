@@ -16,5 +16,5 @@ public interface RestClientFilter {
    * @return the response returned by the remaining chain
    */
   <T> HttpResponse<T> filter(
-      RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context);
+      RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler, FilterContext context);
 }

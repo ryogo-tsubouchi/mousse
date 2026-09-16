@@ -146,11 +146,11 @@ class RestClientTests {
             .GET()
             .build();
 
-    RestClientRequest clientRequest = new RestClientRequest(request);
+    RequestWrapper clientRequest = new RequestWrapper(request);
 
-    assertEquals(request, clientRequest.request());
+    assertEquals(request, clientRequest.getRequest());
     assertEquals("", clientRequest.bodyAsString());
-    assertThrows(NullPointerException.class, () -> new RestClientRequest(null));
+    assertThrows(NullPointerException.class, () -> new RequestWrapper(null));
   }
 
   @Test
@@ -160,7 +160,7 @@ class RestClientTests {
         java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost/items"))
             .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(body))
             .build();
-    RestClientRequest clientRequest = new RestClientRequest(request, body);
+    RequestWrapper clientRequest = new RequestWrapper(request, body);
 
     body[0] = 'X';
 

@@ -29,8 +29,7 @@ class FilterContextImpl implements FilterContext {
    * @return the response returned by the next filter or the HTTP client
    */
   @Override
-  public <T> HttpResponse<T> next(
-      RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler) {
+  public <T> HttpResponse<T> next(RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler) {
     if (index < filters.size()) {
       return filters.get(index++).filter(request, bodyHandler, this);
     }
@@ -38,9 +37,9 @@ class FilterContextImpl implements FilterContext {
   }
 
   private <T> HttpResponse<T> sendRequest(
-      RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler) {
+      RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler) {
     try {
-      return httpClientSupplier.get().send(request.request(), bodyHandler);
+      return httpClientSupplier.get().send(request.getRequest(), bodyHandler);
     } catch (IOException e) {
       throw new RestClientException(e);
     } catch (InterruptedException e) {

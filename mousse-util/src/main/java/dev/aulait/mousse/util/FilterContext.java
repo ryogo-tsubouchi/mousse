@@ -13,5 +13,5 @@ public interface FilterContext {
    * @param <T> the response body type
    * @return the response returned by the remaining chain
    */
-  <T> HttpResponse<T> next(RestClientRequest request, HttpResponse.BodyHandler<T> bodyHandler);
+  <T> HttpResponse<T> next(RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler);
 }
