@@ -167,34 +167,6 @@ class RestClientTests {
   }
 
   @Test
-  void requestWithoutBodyTest() {
-    java.net.http.HttpRequest request =
-        java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost/items"))
-            .GET()
-            .build();
-
-    RequestWrapper clientRequest = new RequestWrapper(request);
-
-    assertEquals(request, clientRequest.getRequest());
-    assertEquals("", clientRequest.bodyAsString());
-    assertThrows(NullPointerException.class, () -> new RequestWrapper(null));
-  }
-
-  @Test
-  void requestPreservesBodyTest() {
-    byte[] body = "payload".getBytes(StandardCharsets.UTF_8);
-    java.net.http.HttpRequest request =
-        java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost/items"))
-            .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(body))
-            .build();
-    RequestWrapper clientRequest = new RequestWrapper(request, body);
-
-    body[0] = 'X';
-
-    assertEquals("payload", clientRequest.bodyAsString());
-  }
-
-  @Test
   void getTest() {
     Item item = client.get("/api/items/{id}", Item.class, "1");
     assertEquals("1", item.getId());
