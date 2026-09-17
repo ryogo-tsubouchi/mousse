@@ -1,13 +1,13 @@
 package dev.aulait.mousse.util;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.github.valfirst.slf4jtest.LoggingEvent;
 import com.github.valfirst.slf4jtest.TestLogger;
 import com.github.valfirst.slf4jtest.TestLoggerFactory;
-import com.github.valfirst.slf4jtest.TestLoggerFactoryExtension;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -23,11 +23,13 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.event.Level;
 
-@ExtendWith(TestLoggerFactoryExtension.class)
 class RestClientTests {
 
   static HttpServer server;
@@ -131,6 +133,24 @@ class RestClientTests {
           sendResponse(exchange, 500, "{\"error\":\"internal server error\"}");
         });
 
+    server.createContext(
+        "/api/connection-closed",
+        exchange -> {
+          try (exchange) {
+            exchange.getRequestBody().readAllBytes();
+          }
+        });
+
+    server.createContext(
+        "/api/filter-order",
+        exchange -> {
+          String body =
+              new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+          TestLoggerFactory.getTestLogger("filter-order-http-exchange")
+              .info("HTTP request received");
+          sendResponse(exchange, 200, body);
+        });
+
     server.start();
     int port = server.getAddress().getPort();
     client = RestClient.builder().baseUrl("http://localhost:" + port).build();
@@ -139,6 +159,11 @@ class RestClientTests {
   @AfterAll
   static void tearDown() {
     server.stop(0);
+  }
+
+  @BeforeEach
+  void clearLogs() {
+    TestLoggerFactory.clearAll();
   }
 
   @Test
@@ -234,12 +259,16 @@ class RestClientTests {
   }
 
   @Test
+  @Timeout(10)
   void loggingFiltersLogRequestAndResponseTest() {
     TestLogger requestLogger = TestLoggerFactory.getTestLogger(RequestLoggingFilter.class);
     TestLogger responseLogger = TestLoggerFactory.getTestLogger(ResponseLoggingFilter.class);
+    TestLogger exchangeLogger = TestLoggerFactory.getTestLogger("filter-order-http-exchange");
     requestLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
     responseLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
+    exchangeLogger.setEnabledLevelsForAllThreads(Level.INFO);
 
+    String path = "/api/filter-order";
     String baseUrl = "http://localhost:" + server.getAddress().getPort();
     RestClient loggingClient =
         RestClient.builder()
@@ -258,27 +287,109 @@ class RestClientTests {
         "Response headers: {content-length=[31], content-type=[application/json; charset=UTF-8],"
             + " date=[<date>]}";
 
-    loggingClient.post("/api/items", Item.of("1", "Logged Item"), Item.class);
+    Item requestBody = Item.of("1", "Logged Item");
 
-    List<LoggingEvent> requestEvents = requestLogger.getLoggingEvents();
+    Item response = loggingClient.post(path, requestBody, Item.class);
+
+    assertEquals(requestBody, response);
     assertEquals(
         List.of(
             "Request method: POST",
-            "Request URI: " + baseUrl + "/api/items",
+            "Request URI: " + baseUrl + path,
             expectedRequestHeaders,
-            "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
+            "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}",
+            "HTTP request received",
+            "Response status: 200",
+            expectedResponseHeaders,
+            "Response body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
+        TestLoggerFactory.getAllLoggingEvents().stream()
+            .map(LoggingEvent::getFormattedMessage)
+            .map(message -> message.replaceFirst("date=\\[[^\\]]+\\]", "date=[<date>]"))
+            .toList());
+  }
+
+  @ParameterizedTest
+  @CsvSource({"/api/not-found, 404, not found", "/api/server-error, 500, internal server error"})
+  void loggingFiltersLogErrorResponseTest(String path, int statusCode, String errorMessage) {
+    TestLogger requestLogger = TestLoggerFactory.getTestLogger(RequestLoggingFilter.class);
+    TestLogger responseLogger = TestLoggerFactory.getTestLogger(ResponseLoggingFilter.class);
+    requestLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
+    responseLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
+
+    String baseUrl = "http://localhost:" + server.getAddress().getPort();
+    RestClient loggingClient =
+        RestClient.builder()
+            .baseUrl(baseUrl)
+            .filters(List.of(new RequestLoggingFilter(), new ResponseLoggingFilter()))
+            .build();
+    String expectedBody = "{\"error\":\"" + errorMessage + "\"}";
+    String expectedRequestHeaders =
+        "Request headers: {Accept=[*/*], Accept-Language=["
+            + Locale.getDefault().toString().replace("_", "-")
+            + "], Content-Type=[application/json; charset=UTF-8]}";
+    String expectedResponseHeaders =
+        "Response headers: {content-length=["
+            + expectedBody.getBytes(StandardCharsets.UTF_8).length
+            + "], content-type=[application/json; charset=UTF-8], date=[<date>]}";
+
+    RestClientException exception =
+        assertThrows(RestClientException.class, () -> loggingClient.get(path, Item.class));
+
+    assertEquals(statusCode, exception.getStatusCode());
+    assertEquals(expectedBody, exception.getBody());
+    List<LoggingEvent> requestEvents = requestLogger.getLoggingEvents();
+    assertEquals(
+        List.of(
+            "Request method: GET",
+            "Request URI: " + baseUrl + path,
+            expectedRequestHeaders,
+            "Request body: "),
         requestEvents.stream().map(LoggingEvent::getFormattedMessage).toList());
 
     List<LoggingEvent> responseEvents = responseLogger.getLoggingEvents();
     assertEquals(
         List.of(
-            "Response status: 200",
+            "Response status: " + statusCode,
             expectedResponseHeaders,
-            "Response body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
+            "Response body: " + expectedBody),
         responseEvents.stream()
             .map(LoggingEvent::getFormattedMessage)
             .map(message -> message.replaceFirst("date=\\[[^\\]]+\\]", "date=[<date>]"))
             .toList());
+  }
+
+  @Test
+  @Timeout(10)
+  void loggingFiltersLogRequestOnIOExceptionTest() {
+    TestLogger requestLogger = TestLoggerFactory.getTestLogger(RequestLoggingFilter.class);
+    TestLogger responseLogger = TestLoggerFactory.getTestLogger(ResponseLoggingFilter.class);
+    requestLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
+    responseLogger.setEnabledLevels(Level.INFO, Level.DEBUG);
+
+    String path = "/api/connection-closed";
+    String baseUrl = "http://localhost:" + server.getAddress().getPort();
+    RestClient loggingClient =
+        RestClient.builder()
+            .baseUrl(baseUrl)
+            .filters(List.of(new RequestLoggingFilter(), new ResponseLoggingFilter()))
+            .build();
+
+    Item requestBody = Item.of("1", "Logged Item");
+    RestClientException exception =
+        assertThrows(
+            RestClientException.class, () -> loggingClient.post(path, requestBody, Item.class));
+
+    assertInstanceOf(IOException.class, exception.getCause());
+    assertEquals(
+        List.of(
+            "Request method: POST",
+            "Request URI: " + baseUrl + path,
+            "Request headers: {Accept=[*/*], Accept-Language=["
+                + Locale.getDefault().toString().replace("_", "-")
+                + "], Content-Type=[application/json; charset=UTF-8]}",
+            "Request body: {\"id\":\"1\",\"name\":\"Logged Item\"}"),
+        requestLogger.getLoggingEvents().stream().map(LoggingEvent::getFormattedMessage).toList());
+    assertTrue(responseLogger.getLoggingEvents().isEmpty());
   }
 
   @Test
