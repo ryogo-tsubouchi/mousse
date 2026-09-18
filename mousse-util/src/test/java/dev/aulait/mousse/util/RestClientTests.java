@@ -1,5 +1,6 @@
 package dev.aulait.mousse.util;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,10 +14,15 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -228,6 +234,66 @@ class RestClientTests {
     Item result = client.post("/api/items", item, Item.class);
     assertEquals("1", result.getId());
     assertEquals("New Item", result.getName());
+  }
+
+  @Test
+  void requestWrapperConvertsJsonBodyTest() {
+    RequestWrapper empty = new RequestWrapper(client.getBaseUrl(), Map.of(), "GET");
+    assertEquals("", empty.bodyAsString());
+    assertTrue(empty.getRequest().bodyPublisher().isEmpty());
+
+    byte[] body = {1, 2, 3};
+    RequestWrapper json =
+        new RequestWrapper(client.getBaseUrl(), Map.of("X-Test", "value"), (Object) body, "POST");
+    assertEquals(JsonUtils.obj2str(body), json.bodyAsString());
+    assertEquals("value", json.getRequest().headers().firstValue("X-Test").orElseThrow());
+  }
+
+  @Test
+  void headerSuppliersAreResolvedPerRequestTest() {
+    AtomicReference<String> token = new AtomicReference<>("first");
+    RestClient dynamicClient =
+        RestClient.builder()
+            .baseUrl(client.getBaseUrl())
+            .headerSupplier("Authorization", token::get)
+            .build();
+
+    assertEquals("{\"token\":\"first\"}", dynamicClient.get("/api/auth-check", String.class));
+    token.set("second");
+    assertEquals("{\"token\":\"second\"}", dynamicClient.get("/api/auth-check", String.class));
+    token.set(null);
+    assertEquals("{\"token\":\"none\"}", dynamicClient.get("/api/auth-check", String.class));
+    token.set("");
+    assertEquals("{\"token\":\"none\"}", dynamicClient.get("/api/auth-check", String.class));
+
+    RestClient fixedClient =
+        RestClient.builder()
+            .baseUrl(client.getBaseUrl())
+            .headerSupplier("authorization", () -> "dynamic")
+            .header("Authorization", "fixed")
+            .build();
+    assertEquals("{\"token\":\"fixed\"}", fixedClient.get("/api/auth-check", String.class));
+  }
+
+  @ParameterizedTest
+  @Timeout(10)
+  @CsvSource({"POST, '\u65e5\u672c\u8a9e'", "PUT, payload", "DELETE, payload", "POST, ''"})
+  void requestWrapperPublishesLoggedBodyTest(String method, String text) throws Exception {
+    byte[] body = text.getBytes(StandardCharsets.UTF_8);
+    RequestWrapper wrapper =
+        new RequestWrapper(client.getBaseUrl() + "/api/filter-order", Map.of(), body, method);
+    Arrays.fill(body, (byte) 0);
+
+    assertEquals(method, wrapper.getRequest().method());
+    assertEquals(body.length, wrapper.getRequest().bodyPublisher().orElseThrow().contentLength());
+    assertEquals(text, wrapper.bodyAsString());
+    try (HttpClient httpClient = HttpClient.newHttpClient()) {
+      for (int attempt = 0; attempt < 2; attempt++) {
+        HttpResponse<byte[]> response =
+            httpClient.send(wrapper.getRequest(), HttpResponse.BodyHandlers.ofByteArray());
+        assertArrayEquals(text.getBytes(StandardCharsets.UTF_8), response.body());
+      }
+    }
   }
 
   @Test

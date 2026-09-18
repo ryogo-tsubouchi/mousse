@@ -1,12 +1,10 @@
 package dev.aulait.mousse.util;
 
+import dev.aulait.mousse.util.ResponseWrapper.ResponseType;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -16,12 +14,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Supplier;
 import lombok.Builder;
-import lombok.Data;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.Singular;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.microprofile.config.Config;
@@ -65,8 +62,9 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T get(String path, Class<T> responseType, Object... pathParams) {
-    HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return execute(new RequestWrapper(request), new ResponseType<>(responseType)).getParsedBody();
+    RequestWrapper request =
+        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
+    return execute(request, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -80,8 +78,9 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T get(String path, JsonType<T> typeRef, Object... pathParams) {
-    HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return execute(new RequestWrapper(request), new ResponseType<>(typeRef)).getParsedBody();
+    RequestWrapper request =
+        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
+    return execute(request, new ResponseType<>(typeRef)).getParsedBody();
   }
 
   /**
@@ -93,8 +92,9 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public byte[] getAsByte(String path, Object... pathParams) {
-    HttpRequest request = newRequest(resolvePath(path, pathParams)).GET().build();
-    return executeAsBytes(new RequestWrapper(request));
+    RequestWrapper request =
+        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
+    return executeAsBytes(request);
   }
 
   /**
@@ -109,11 +109,9 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T post(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
-    byte[] body = toBody(requestBody);
-    HttpRequest request =
-        newRequest(resolvePath(path, pathParams)).POST(BodyPublishers.ofByteArray(body)).build();
-    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
-        .getParsedBody();
+    RequestWrapper request =
+        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "POST");
+    return execute(request, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -140,12 +138,15 @@ public class RestClient {
   public <T> T postMultipart(
       String path, Map<String, Object> parts, Class<T> responseType, Object... pathParams) {
     String boundary = UUID.randomUUID().toString();
-    byte[] body = toMultipartBody(parts, boundary);
-    HttpRequest.Builder builder = newRequest(resolvePath(path, pathParams));
-    builder.setHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-    HttpRequest request = builder.POST(BodyPublishers.ofByteArray(body)).build();
-    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
-        .getParsedBody();
+    Map<String, String> requestHeaders = resolveHeaders();
+    requestHeaders.put("Content-Type", "multipart/form-data; boundary=" + boundary);
+    RequestWrapper request =
+        new RequestWrapper(
+            resolvePath(path, pathParams),
+            requestHeaders,
+            toMultipartBody(parts, boundary),
+            "POST");
+    return execute(request, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -160,11 +161,9 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T put(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
-    byte[] body = toBody(requestBody);
-    HttpRequest request =
-        newRequest(resolvePath(path, pathParams)).PUT(BodyPublishers.ofByteArray(body)).build();
-    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
-        .getParsedBody();
+    RequestWrapper request =
+        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "PUT");
+    return execute(request, new ResponseType<>(responseType)).getParsedBody();
   }
 
   /**
@@ -180,33 +179,22 @@ public class RestClient {
    */
   public <T> T delete(
       String path, Object requestBody, Class<T> responseType, Object... pathParams) {
-    byte[] body = toBody(requestBody);
-    HttpRequest request =
-        newRequest(resolvePath(path, pathParams))
-            .method("DELETE", BodyPublishers.ofByteArray(body))
-            .build();
-    return execute(new RequestWrapper(request, body), new ResponseType<>(responseType))
-        .getParsedBody();
+    RequestWrapper request =
+        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "DELETE");
+    return execute(request, new ResponseType<>(responseType)).getParsedBody();
   }
 
-  private HttpRequest.Builder newRequest(String url) {
-    HttpRequest.Builder builder = HttpRequest.newBuilder().uri(URI.create(url));
+  private Map<String, String> resolveHeaders() {
+    Map<String, String> resolvedHeaders = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     headerSuppliers.forEach(
         (key, value) -> {
-          String v = value.get();
-          if (v != null && !v.isEmpty()) {
-            builder.header(key, v);
+          String headerValue = value.get();
+          if (headerValue != null && !headerValue.isEmpty()) {
+            resolvedHeaders.put(key, headerValue);
           }
         });
-    headers.forEach(builder::header);
-    return builder;
-  }
-
-  private byte[] toBody(Object body) {
-    if (body == null) {
-      return new byte[0];
-    }
-    return JsonUtils.obj2str(body).getBytes(StandardCharsets.UTF_8);
+    resolvedHeaders.putAll(headers);
+    return resolvedHeaders;
   }
 
   private byte[] toMultipartBody(Map<String, Object> parts, String boundary) {
@@ -268,10 +256,9 @@ public class RestClient {
   }
 
   private <T> ResponseWrapper<T> send(RequestWrapper request, ResponseType<T> responseType) {
-    HttpResponse.BodyHandler<T> bodyHandler = bodyHandler(responseType.getType());
-    HttpResponse<T> response =
-        new FilterContextImpl(filters, this::getHttpClientWithInit).next(request, bodyHandler);
-    return new ResponseWrapper<>(responseType, response);
+    ResponseWrapper<T> response = new ResponseWrapper<>(responseType);
+    new FilterContextImpl(filters, this::getHttpClientWithInit).next(request, response);
+    return response;
   }
 
   private synchronized HttpClient getHttpClientWithInit() {
@@ -280,16 +267,6 @@ public class RestClient {
           HttpClient.newBuilder().connectTimeout(Duration.ofMillis(connectTimeoutMillis)).build();
     }
     return httpClient;
-  }
-
-  @SuppressWarnings("unchecked")
-  private <T> HttpResponse.BodyHandler<T> bodyHandler(Class<T> responseType) {
-    if (responseType == byte[].class) {
-      return (HttpResponse.BodyHandler<T>) HttpResponse.BodyHandlers.ofByteArray();
-    } else {
-      return (HttpResponse.BodyHandler<T>)
-          HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8);
-    }
   }
 
   private void handleResponse(ResponseWrapper<?> response) {
@@ -304,14 +281,14 @@ public class RestClient {
 
   @SuppressWarnings("unchecked")
   private <T> void convertResponse(ResponseWrapper<T> response) {
+    ResponseType<T> responseType = response.getResponseType();
     if (response.getParsedBody() == null) {
       response.setPlainBody(Objects.toString(response.getResponse().body()));
 
-      if (response.getResponseType().getType() == HttpResponse.class) {
+      if (responseType.getType() == HttpResponse.class) {
         response.setParsedBody((T) response.getResponse());
       } else {
-        response.setParsedBody(
-            convertResponse(response.getPlainBody(), response.getResponseType()));
+        response.setParsedBody(convertResponse(response.getPlainBody(), responseType));
       }
     }
   }
@@ -407,28 +384,5 @@ public class RestClient {
 
       return this;
     }
-  }
-
-  @Data
-  private static class ResponseType<T> {
-    private Class<T> type;
-    private JsonType<T> jsonType;
-
-    ResponseType(Class<T> type) {
-      this.type = type;
-    }
-
-    ResponseType(JsonType<T> jsonType) {
-      this.jsonType = jsonType;
-    }
-  }
-
-  @Data
-  @RequiredArgsConstructor
-  private class ResponseWrapper<T> {
-    private final ResponseType<T> responseType;
-    private final HttpResponse<T> response;
-    private String plainBody;
-    private T parsedBody;
   }
 }

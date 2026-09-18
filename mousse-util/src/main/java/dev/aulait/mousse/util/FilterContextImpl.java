@@ -20,26 +20,29 @@ class FilterContextImpl implements FilterContext {
   /**
    * Invokes the next filter, or sends the HTTP request when no filters remain.
    *
-   * <p>Each filter must call {@code context.next(request, bodyHandler)} to continue the chain.
-   * Without this call, the remaining filters are not invoked and the HTTP request is not sent.
+   * <p>Each filter must call {@code context.next(request, response)} to continue the chain. Without
+   * this call, the remaining filters are not invoked and the HTTP request is not sent.
    *
    * @param request the request to pass to the next filter or send
-   * @param bodyHandler the response body handler
+   * @param response the wrapper populated with the response returned by the remaining chain
    * @param <T> the response body type
    * @return the response returned by the next filter or the HTTP client
    */
   @Override
-  public <T> HttpResponse<T> next(RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler) {
+  public <T> HttpResponse<T> next(RequestWrapper request, ResponseWrapper<T> response) {
+    HttpResponse<T> httpResponse;
     if (index < filters.size()) {
-      return filters.get(index++).filter(request, bodyHandler, this);
+      httpResponse = filters.get(index++).filter(request, response, this);
+    } else {
+      httpResponse = sendRequest(request, response);
     }
-    return sendRequest(request, bodyHandler);
+    response.setResponse(httpResponse);
+    return httpResponse;
   }
 
-  private <T> HttpResponse<T> sendRequest(
-      RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler) {
+  private <T> HttpResponse<T> sendRequest(RequestWrapper request, ResponseWrapper<T> response) {
     try {
-      return httpClientSupplier.get().send(request.getRequest(), bodyHandler);
+      return httpClientSupplier.get().send(request.getRequest(), response.getBodyHandler());
     } catch (IOException e) {
       throw new RestClientException(e);
     } catch (InterruptedException e) {

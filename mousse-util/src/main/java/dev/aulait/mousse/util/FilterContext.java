@@ -9,9 +9,9 @@ public interface FilterContext {
    * Continues processing the request.
    *
    * @param request the request to pass to the next filter
-   * @param bodyHandler the response body handler
+   * @param response the wrapper populated with the response returned by the remaining chain
    * @param <T> the response body type
    * @return the response returned by the remaining chain
    */
-  <T> HttpResponse<T> next(RequestWrapper request, HttpResponse.BodyHandler<T> bodyHandler);
+  <T> HttpResponse<T> next(RequestWrapper request, ResponseWrapper<T> response);
 }
