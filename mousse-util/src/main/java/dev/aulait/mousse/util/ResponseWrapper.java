@@ -17,7 +17,15 @@ public class ResponseWrapper<T> {
   private String plainBody;
   private T parsedBody;
 
-  ResponseWrapper(ResponseType<T> responseType) {
+  ResponseWrapper(Class<T> responseType) {
+    this(new ResponseType<>(responseType));
+  }
+
+  ResponseWrapper(JsonType<T> responseType) {
+    this(new ResponseType<>(responseType));
+  }
+
+  private ResponseWrapper(ResponseType<T> responseType) {
     this.responseType = responseType;
     this.bodyHandler = bodyHandler(responseType.getType());
   }

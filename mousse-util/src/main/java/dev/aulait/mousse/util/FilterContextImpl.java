@@ -2,7 +2,6 @@ package dev.aulait.mousse.util;
 
 import java.io.IOException;
 import java.net.http.HttpClient;
-import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -24,25 +23,22 @@ class FilterContextImpl implements FilterContext {
    * this call, the remaining filters are not invoked and the HTTP request is not sent.
    *
    * @param request the request to pass to the next filter or send
-   * @param response the wrapper populated with the response returned by the remaining chain
+   * @param response the wrapper populated with the HTTP response by the remaining chain
    * @param <T> the response body type
-   * @return the response returned by the next filter or the HTTP client
    */
   @Override
-  public <T> HttpResponse<T> next(RequestWrapper request, ResponseWrapper<T> response) {
-    HttpResponse<T> httpResponse;
+  public <T> void next(RequestWrapper request, ResponseWrapper<T> response) {
     if (index < filters.size()) {
-      httpResponse = filters.get(index++).filter(request, response, this);
+      filters.get(index++).filter(request, response, this);
     } else {
-      httpResponse = sendRequest(request, response);
+      sendRequest(request, response);
     }
-    response.setResponse(httpResponse);
-    return httpResponse;
   }
 
-  private <T> HttpResponse<T> sendRequest(RequestWrapper request, ResponseWrapper<T> response) {
+  private <T> void sendRequest(RequestWrapper request, ResponseWrapper<T> response) {
     try {
-      return httpClientSupplier.get().send(request.getRequest(), response.getBodyHandler());
+      response.setResponse(
+          httpClientSupplier.get().send(request.getRequest(), response.getBodyHandler()));
     } catch (IOException e) {
       throw new RestClientException(e);
     } catch (InterruptedException e) {

@@ -1,6 +1,5 @@
 package dev.aulait.mousse.util;
 
-import java.net.http.HttpResponse;
 import lombok.extern.slf4j.Slf4j;
 
 /** Logs request details around a {@link RestClient} HTTP call. */
@@ -8,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RequestLoggingFilter implements RestClientFilter {
 
   @Override
-  public <T> HttpResponse<T> filter(
+  public <T> void filter(
       RequestWrapper request, ResponseWrapper<T> response, FilterContext context) {
     log.info("Request method: {}", request.getRequest().method());
     log.info("Request URI: {}", request.getRequest().uri());
@@ -16,6 +15,6 @@ public class RequestLoggingFilter implements RestClientFilter {
     if (log.isDebugEnabled()) {
       log.debug("Request body: {}", request.bodyAsString());
     }
-    return context.next(request, response);
+    context.next(request, response);
   }
 }

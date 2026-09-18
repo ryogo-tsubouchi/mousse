@@ -64,7 +64,7 @@ public class RestClient {
   public <T> T get(String path, Class<T> responseType, Object... pathParams) {
     RequestWrapper request =
         new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
   /**
@@ -80,7 +80,7 @@ public class RestClient {
   public <T> T get(String path, JsonType<T> typeRef, Object... pathParams) {
     RequestWrapper request =
         new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
-    return execute(request, new ResponseType<>(typeRef)).getParsedBody();
+    return execute(request, new ResponseWrapper<>(typeRef)).getParsedBody();
   }
 
   /**
@@ -111,7 +111,7 @@ public class RestClient {
   public <T> T post(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
     RequestWrapper request =
         new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "POST");
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
   /**
@@ -146,7 +146,7 @@ public class RestClient {
             requestHeaders,
             toMultipartBody(parts, boundary),
             "POST");
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
   /**
@@ -163,7 +163,7 @@ public class RestClient {
   public <T> T put(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
     RequestWrapper request =
         new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "PUT");
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
   /**
@@ -181,7 +181,7 @@ public class RestClient {
       String path, Object requestBody, Class<T> responseType, Object... pathParams) {
     RequestWrapper request =
         new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "DELETE");
-    return execute(request, new ResponseType<>(responseType)).getParsedBody();
+    return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
   private Map<String, String> resolveHeaders() {
@@ -242,23 +242,22 @@ public class RestClient {
     }
   }
 
-  private <T> ResponseWrapper<T> execute(RequestWrapper request, ResponseType<T> responseType) {
-    ResponseWrapper<T> response = send(request, responseType);
+  private <T> ResponseWrapper<T> execute(RequestWrapper request, ResponseWrapper<T> response) {
+    send(request, response);
     handleResponse(response);
     convertResponse(response);
     return response;
   }
 
   private byte[] executeAsBytes(RequestWrapper request) {
-    ResponseWrapper<byte[]> response = send(request, new ResponseType<>(byte[].class));
+    ResponseWrapper<byte[]> response = new ResponseWrapper<>(byte[].class);
+    send(request, response);
     handleResponse(response);
     return response.getResponse().body();
   }
 
-  private <T> ResponseWrapper<T> send(RequestWrapper request, ResponseType<T> responseType) {
-    ResponseWrapper<T> response = new ResponseWrapper<>(responseType);
+  private <T> void send(RequestWrapper request, ResponseWrapper<T> response) {
     new FilterContextImpl(filters, this::getHttpClientWithInit).next(request, response);
-    return response;
   }
 
   private synchronized HttpClient getHttpClientWithInit() {
