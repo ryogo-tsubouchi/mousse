@@ -1,11 +1,12 @@
 package dev.aulait.mousse.util;
 
-import dev.aulait.mousse.util.ResponseWrapper.ResponseType;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpResponse;
+import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -62,8 +63,7 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T get(String path, Class<T> responseType, Object... pathParams) {
-    RequestWrapper request =
-        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
+    RequestWrapper request = new RequestWrapper(requestBuilder(path, pathParams).GET().build());
     return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
@@ -78,8 +78,7 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T get(String path, JsonType<T> typeRef, Object... pathParams) {
-    RequestWrapper request =
-        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
+    RequestWrapper request = new RequestWrapper(requestBuilder(path, pathParams).GET().build());
     return execute(request, new ResponseWrapper<>(typeRef)).getParsedBody();
   }
 
@@ -92,8 +91,7 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public byte[] getAsByte(String path, Object... pathParams) {
-    RequestWrapper request =
-        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), "GET");
+    RequestWrapper request = new RequestWrapper(requestBuilder(path, pathParams).GET().build());
     return executeAsBytes(request);
   }
 
@@ -109,8 +107,10 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T post(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
+    byte[] body = bodyAsBytes(requestBody);
     RequestWrapper request =
-        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "POST");
+        new RequestWrapper(
+            requestBuilder(path, pathParams).POST(BodyPublishers.ofByteArray(body)).build(), body);
     return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
@@ -140,12 +140,13 @@ public class RestClient {
     String boundary = UUID.randomUUID().toString();
     Map<String, String> requestHeaders = resolveHeaders();
     requestHeaders.put("Content-Type", "multipart/form-data; boundary=" + boundary);
+    byte[] body = toMultipartBody(parts, boundary);
     RequestWrapper request =
         new RequestWrapper(
-            resolvePath(path, pathParams),
-            requestHeaders,
-            toMultipartBody(parts, boundary),
-            "POST");
+            requestBuilder(path, requestHeaders, pathParams)
+                .POST(BodyPublishers.ofByteArray(body))
+                .build(),
+            body);
     return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
@@ -161,17 +162,19 @@ public class RestClient {
    * @throws RestClientException if the response status is not 2xx
    */
   public <T> T put(String path, Object requestBody, Class<T> responseType, Object... pathParams) {
+    byte[] body = bodyAsBytes(requestBody);
     RequestWrapper request =
-        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "PUT");
+        new RequestWrapper(
+            requestBuilder(path, pathParams).PUT(BodyPublishers.ofByteArray(body)).build(), body);
     return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
   }
 
   /**
-   * Executes a DELETE request and returns the response body converted to the specified type.
+   * Executes a bodyless DELETE request and returns the response body converted to the specified
+   * type.
    *
    * @param <T> the response type
    * @param path the request path; path parameters are specified in {@code {name}} format
-   * @param requestBody the request body, serialized to JSON; {@code null} sends no body
    * @param responseType the class to convert the response body to
    * @param pathParams values for path parameters, substituted in order of appearance
    * @return the converted response object
@@ -179,9 +182,30 @@ public class RestClient {
    */
   public <T> T delete(
       String path, Object requestBody, Class<T> responseType, Object... pathParams) {
+    byte[] body = bodyAsBytes(requestBody);
     RequestWrapper request =
-        new RequestWrapper(resolvePath(path, pathParams), resolveHeaders(), requestBody, "DELETE");
+        new RequestWrapper(
+            requestBuilder(path, pathParams)
+                .method("DELETE", BodyPublishers.ofByteArray(body))
+                .build(),
+            body);
     return execute(request, new ResponseWrapper<>(responseType)).getParsedBody();
+  }
+
+  private HttpRequest.Builder requestBuilder(String path, Object... pathParams) {
+    return requestBuilder(path, resolveHeaders(), pathParams);
+  }
+
+  private HttpRequest.Builder requestBuilder(
+      String path, Map<String, String> requestHeaders, Object... pathParams) {
+    HttpRequest.Builder builder =
+        HttpRequest.newBuilder().uri(URI.create(resolvePath(path, pathParams)));
+    requestHeaders.forEach(builder::header);
+    return builder;
+  }
+
+  private byte[] bodyAsBytes(Object body) {
+    return body == null ? new byte[0] : JsonUtils.obj2str(body).getBytes(StandardCharsets.UTF_8);
   }
 
   private Map<String, String> resolveHeaders() {
@@ -245,7 +269,7 @@ public class RestClient {
   private <T> ResponseWrapper<T> execute(RequestWrapper request, ResponseWrapper<T> response) {
     send(request, response);
     handleResponse(response);
-    convertResponse(response);
+    response.convertBody();
     return response;
   }
 
@@ -275,44 +299,6 @@ public class RestClient {
     if (response.getResponse().statusCode() < 200 || response.getResponse().statusCode() >= 300) {
       throw new RestClientException(
           response.getResponse().statusCode(), Objects.toString(response.getResponse().body()));
-    }
-  }
-
-  @SuppressWarnings("unchecked")
-  private <T> void convertResponse(ResponseWrapper<T> response) {
-    ResponseType<T> responseType = response.getResponseType();
-    if (response.getParsedBody() == null) {
-      response.setPlainBody(Objects.toString(response.getResponse().body()));
-
-      if (responseType.getType() == HttpResponse.class) {
-        response.setParsedBody((T) response.getResponse());
-      } else {
-        response.setParsedBody(convertResponse(response.getPlainBody(), responseType));
-      }
-    }
-  }
-
-  @SuppressWarnings("unchecked")
-  <T> T convertResponse(String body, ResponseType<T> responseType) {
-    Class<T> type = responseType.getType();
-    if (type == Void.class || type == void.class) {
-      return null;
-    } else if (type == String.class) {
-      return (T) body;
-    } else if (type == Integer.class) {
-      return (T) Integer.valueOf(body.trim());
-    } else if (type == Long.class) {
-      return (T) Long.valueOf(body.trim());
-    } else if (type == UUID.class) {
-      String value = body.trim();
-      if (value.startsWith("\"") && value.endsWith("\"")) {
-        value = value.substring(1, value.length() - 1);
-      }
-      return (T) UUID.fromString(value);
-    } else if (responseType.getJsonType() != null) {
-      return JsonUtils.str2obj(body, responseType.getJsonType());
-    } else {
-      return JsonUtils.str2obj(body, type);
     }
   }
 
