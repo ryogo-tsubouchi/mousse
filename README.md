@@ -185,7 +185,8 @@ try {
 
 #### Header logging
 
-Configure header selection and masking on the logging filters:
+Use a builder preconfigured with the default masked headers, then add custom masks and configure
+header selection and exclusions before passing the settings to the logging filters:
 
 ```java
 import dev.aulait.mousse.util.restclient.HeaderLogConfig;
@@ -195,11 +196,12 @@ import dev.aulait.mousse.util.restclient.RestClient;
 import java.util.List;
 import java.util.Set;
 
-HeaderLogConfig headers = HeaderLogConfig.builder()
-        .includedHeaders(Set.of("Content-Type", "Authorization", "X-Api-Key", "X-Internal"))
-        .excludedHeaders(Set.of("X-Internal"))
-        .maskedHeaders(Set.of("X-Api-Key"))
-        .build();
+HeaderLogConfig headers =
+  HeaderLogConfig.builderWithDefaultMaskedHeaders()
+    .maskedHeaders(Set.of("X-Api-Key"))
+    .includedHeaders(Set.of("Content-Type", "Authorization", "X-Api-Key", "X-Request-Id", "X-Internal"))
+    .excludedHeaders(Set.of("X-Internal"))
+    .build();
 
 RestClient client = RestClient.builder()
         .baseUrl("https://api.example.com")
@@ -207,15 +209,22 @@ RestClient client = RestClient.builder()
         .build();
 ```
 
+    In this example, only the included headers can appear in request and response header logs.
+    `X-Internal` is omitted even though it is included. `Authorization` and `X-Api-Key` are masked,
+    while `Content-Type` and `X-Request-Id` retain their values.
+
 - Names are case-insensitive. Rules select included headers, remove excluded headers, then mask
   the remaining sensitive values. Exclusion takes precedence over inclusion and masking.
 - Omitting `includedHeaders` (or passing `null`) selects all headers. `Set.of()` selects none.
 - Omitting `excludedHeaders` or passing `null` excludes none.
-- `Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` are always masked.
-  `maskedHeaders` adds custom sensitive headers; an empty or null set does not disable defaults.
-  Every masked value, including each value of a multi-valued header, becomes `***`.
-- No-argument logging filters use these defaults. This intentionally changes previous behavior,
-  which logged sensitive header values in plain text.
+- `builderWithDefaultMaskedHeaders()` returns a builder with `Authorization`, `Proxy-Authorization`,
+  `Cookie`, and `Set-Cookie` configured for masking. Selection and exclusion can still be customized.
+- `builder()` has no default masks. `maskedHeaders` adds to the configured headers without replacing
+  existing masks, including the defaults. Repeated calls accumulate headers; an empty or null set
+  leaves the current configuration unchanged. Every masked value, including each value of a
+  multi-valued header, becomes `***`.
+- No-argument logging filters do not mask headers. Pass an explicit configuration as above to
+  avoid logging sensitive header values in plain text.
 - Settings are immutable and can be shared, or different settings can be passed to each filter.
   Header names retain their original spelling; logging never modifies request or response values.
 - Method, URI, status, and body logging are unchanged. Bodies at DEBUG and URIs are **not masked**;

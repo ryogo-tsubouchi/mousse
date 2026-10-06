@@ -336,7 +336,10 @@ class RestClientTests {
     @Timeout(10)
     void loggingFiltersMaskHeadersTest() {
       String path = "/api/header-masking";
-      HeaderLogConfig config = HeaderLogConfig.builder().maskedHeaders(Set.of("x-api-key")).build();
+      HeaderLogConfig config =
+          HeaderLogConfig.builderWithDefaultMaskedHeaders()
+              .maskedHeaders(Set.of("x-api-key"))
+              .build();
       RestClient loggingClient =
           loggingClientBuilder
               .clearFilters()
@@ -355,6 +358,39 @@ class RestClientTests {
       assertTrue(requestMessages.contains("X-Api-Key=[***]"));
       assertTrue(responseMessages.contains("set-cookie=[***, ***]"));
       assertTrue(responseMessages.contains("x-api-key=[***]"));
+    }
+
+    @Test
+    @Timeout(10)
+    void loggingFiltersIncludeAndExcludeHeadersTest() {
+      HeaderLogConfig config =
+          HeaderLogConfig.builder()
+              .includedHeaders(Set.of("x-request-id", "X-API-KEY", "SET-COOKIE"))
+              .excludedHeaders(Set.of("x-api-key"))
+              .build();
+      RestClient loggingClient =
+          loggingClientBuilder
+              .clearFilters()
+              .filters(List.of(new RequestLoggingFilter(config), new ResponseLoggingFilter(config)))
+              .header("X-Request-Id", "selection-test")
+              .header("X-Api-Key", "request-key-secret")
+              .header("X-Unselected", "unselected-value")
+              .build();
+
+      loggingClient.get("/api/header-masking", String.class);
+
+      assertEquals(
+          List.of("Request headers: {X-Request-Id=[selection-test]}"),
+          requestLogger.getLoggingEvents().stream()
+              .map(LoggingEvent::getFormattedMessage)
+              .filter(message -> message.startsWith("Request headers:"))
+              .toList());
+      assertEquals(
+          List.of("Response headers: {set-cookie=[session=first-secret, session=second-secret]}"),
+          responseLogger.getLoggingEvents().stream()
+              .map(LoggingEvent::getFormattedMessage)
+              .filter(message -> message.startsWith("Response headers:"))
+              .toList());
     }
 
     private String loggingMessagesAsString(TestLogger logger) {

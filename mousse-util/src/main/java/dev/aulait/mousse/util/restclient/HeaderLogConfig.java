@@ -24,19 +24,36 @@ public final class HeaderLogConfig {
    *
    * @param includedHeaders null selects all headers; an empty set selects none
    * @param excludedHeaders headers to omit after selection; null excludes none
-   * @param maskedHeaders additional headers to mask alongside the default sensitive headers; null
-   *     adds none. Every value is replaced with {@code ***}.
+   * @param maskedHeaders headers to mask; null masks none. Every value is replaced with {@code
+   *     ***}.
    */
   @Builder
   private HeaderLogConfig(
       Set<String> includedHeaders, Set<String> excludedHeaders, Set<String> maskedHeaders) {
     this.includedHeaders = includedHeaders == null ? null : normalize(includedHeaders);
     this.excludedHeaders = excludedHeaders == null ? Set.of() : normalize(excludedHeaders);
-    this.maskedHeaders =
-        Stream.concat(
-                DEFAULT_MASKED_HEADERS.stream(),
-                maskedHeaders == null ? Stream.empty() : normalize(maskedHeaders).stream())
-            .collect(Collectors.toUnmodifiableSet());
+    this.maskedHeaders = maskedHeaders == null ? Set.of() : normalize(maskedHeaders);
+  }
+
+  public static HeaderLogConfigBuilder builderWithDefaultMaskedHeaders() {
+    return HeaderLogConfig.builder().maskedHeaders(DEFAULT_MASKED_HEADERS);
+  }
+
+  public static class HeaderLogConfigBuilder {
+    private Set<String> maskedHeaders;
+
+    public HeaderLogConfigBuilder maskedHeaders(Set<String> additionalHeaders) {
+      if (additionalHeaders == null) {
+        return this;
+      }
+
+      maskedHeaders =
+          maskedHeaders == null
+              ? additionalHeaders
+              : Stream.concat(maskedHeaders.stream(), additionalHeaders.stream())
+                  .collect(Collectors.toUnmodifiableSet());
+      return this;
+    }
   }
 
   private static Set<String> normalize(Set<String> names) {
