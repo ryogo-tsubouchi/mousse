@@ -63,6 +63,13 @@
       <version>3.2.6</version>
       <optional>true</optional>
     </dependency>
+
+    <dependency>
+      <groupId>io.smallrye.config</groupId>
+      <artifactId>smallrye-config-core</artifactId>
+      <version>3.12.4</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <parent>

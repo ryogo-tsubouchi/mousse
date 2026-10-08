@@ -182,3 +182,47 @@ try {
     String body = e.getBody();
 }
 ```
+
+#### Logging and header masking
+
+Register logging filters to log request and response details:
+
+```java
+import dev.aulait.mousse.util.restclient.RequestLoggingFilter;
+import dev.aulait.mousse.util.restclient.ResponseLoggingFilter;
+
+RestClient client = RestClient.builder()
+    .baseUrl("https://api.example.com")
+    .filter(new RequestLoggingFilter())
+    .filter(new ResponseLoggingFilter())
+    .build();
+```
+
+Configure the headers to mask in `application.properties`:
+
+```properties
+mousse.rest-client.logging.masked-headers=Authorization,Cookie,Set-Cookie,X-Api-Key
+```
+
+Both filters replace the listed headers' values with `<hidden>` in logs only;
+the actual request and response headers remain unchanged.
+Header names are case-insensitive. If omitted or empty, no headers are masked.
+Bodies and URIs are not masked.
+
+To log only selected items, set a comma-separated list in `application.properties`:
+
+```properties
+mousse.rest-client.logging.items=status,method,uri
+```
+
+| Item     | Request     | Response    | Log level |
+| -------- | ----------- | ----------- | --------- |
+| `status` |             | Status code | INFO      |
+| `header` | Headers     | Headers     | INFO      |
+| `body`   | Body        | Body        | DEBUG     |
+| `method` | HTTP method |             | INFO      |
+| `uri`    | Request URI |             | INFO      |
+
+Only listed items are logged. If omitted or empty, all items are enabled.
+Item names are case-insensitive. Enable DEBUG logging to include bodies.
+Header masking also applies when `header` is selected.

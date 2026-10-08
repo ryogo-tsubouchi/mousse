@@ -12,6 +12,7 @@ import com.github.valfirst.slf4jtest.TestLoggerFactory;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.aulait.mousse.util.JsonType;
+import io.smallrye.config.SmallRyeConfigBuilder;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -23,6 +24,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.eclipse.microprofile.config.Config;
+import org.eclipse.microprofile.config.spi.ConfigProviderResolver;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -286,6 +289,65 @@ class RestClientTests {
               .map(LoggingEvent::getFormattedMessage)
               .map(message -> message.replaceFirst("date=\\[[^\\]]+\\]", "date=[<date>]"))
               .toList());
+    }
+
+    @Test
+    void loggingFiltersSelectItemsTest() {
+      withLoggingConfig(
+          "mousse.rest-client.logging.items",
+          "method,status",
+          () -> {
+            assertEquals(42, loggingClientBuilder.build().get("/api/count", Integer.class));
+            assertEquals(
+                List.of("Request method: GET", "Response status: 200"),
+                TestLoggerFactory.getAllLoggingEvents().stream()
+                    .map(LoggingEvent::getFormattedMessage)
+                    .toList());
+          });
+    }
+
+    @Test
+    void loggingFiltersMaskHeadersTest() {
+      withLoggingConfig(
+          "mousse.rest-client.logging.masked-headers",
+          "Authorization,Content-Type",
+          () -> {
+            RestClient loggingClient =
+                loggingClientBuilder.header("Authorization", "Bearer test-secret").build();
+            assertEquals(42, loggingClient.get("/api/count", Integer.class));
+
+            String requestLogs =
+                requestLogger.getLoggingEvents().stream()
+                    .map(LoggingEvent::getFormattedMessage)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            String responseLogs =
+                responseLogger.getLoggingEvents().stream()
+                    .map(LoggingEvent::getFormattedMessage)
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            assertTrue(requestLogs.contains("Authorization=[<hidden>]"));
+            assertTrue(requestLogs.contains("Content-Type=[<hidden>]"));
+            assertTrue(responseLogs.contains("content-type=[<hidden>]"));
+            assertTrue(requestLogs.contains("Accept=[*/*]"));
+            assertFalse(requestLogs.contains("test-secret"));
+          });
+    }
+
+    private void withLoggingConfig(String property, String value, Runnable action) {
+      Config config = new SmallRyeConfigBuilder().withDefaultValue(property, value).build();
+      ConfigProviderResolver resolver = ConfigProviderResolver.instance();
+      ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
+      ClassLoader testClassLoader = new ClassLoader(originalClassLoader) {};
+      resolver.registerConfig(config, testClassLoader);
+      try {
+        Thread.currentThread().setContextClassLoader(testClassLoader);
+        loggingClientBuilder
+            .clearFilters()
+            .filters(List.of(new RequestLoggingFilter(), new ResponseLoggingFilter()));
+        action.run();
+      } finally {
+        Thread.currentThread().setContextClassLoader(originalClassLoader);
+        resolver.releaseConfig(config);
+      }
     }
 
     @ParameterizedTest
